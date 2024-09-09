@@ -4,8 +4,7 @@ import collections
 import torch.optim as optim
 import logging
 import numpy as np
-from galore_torch import AdamBCDConservative, AdamWBCDConservative
-import wandb
+from blockllm import AdamBCDConservative, AdamWBCDConservative
 import ipdb
 import random
 
@@ -61,7 +60,7 @@ def adjust_parameters_selective_weighted(
     world_size=1,
     param_visit_count=None,  # Add this parameter to keep track of previously selected parameters
     optimizer=None,
-    optimizer_state = None
+    optimizer_state=None,
 ):
     """For the given sparsity level, identify the top-n layers
     which can be pruned. Pruning is based on magnitude. Once we decide the layer(s)
@@ -247,7 +246,6 @@ def adjust_parameters_selective_weighted(
         else:
             break
 
-
     # Estimate the sparsity level that the optimizer needs to achieve
     # This is the num_parameters_to_keep / running_param_count
     opt_sparsity_level = num_params_to_keep / running_param_count
@@ -281,9 +279,8 @@ def adjust_parameters_selective_weighted(
         lr = learning_rate
     else:
         lr = optimizer.param_groups[0]["lr"]
-    optimizer= optim.Adam(
-        [get_parameter_by_name(model, x) for x in top_k_params],
-        lr=lr
+    optimizer = optim.Adam(
+        [get_parameter_by_name(model, x) for x in top_k_params], lr=lr
     )
 
     if current_opt_state_dict is not None:
@@ -304,7 +301,7 @@ def adjust_parameters_selective_weighted(
 
         # Go over the parameters in the optimizer
         for group in optimizer.param_groups:
-            for param in group['params']:
+            for param in group["params"]:
                 # Compare their ids with current_state_dict keys
                 param_id = id(param)
                 if param_id in [id(p) for p in optimizer_state.keys()]:
@@ -314,8 +311,6 @@ def adjust_parameters_selective_weighted(
     # for param in optimizer_state:
     #     if param in top_k_params:
     #         optimizer.state[param] = optimizer_state[param]
-
-    wandb.log({"Selected parameters": top_k_params})
 
     #  Freeze all parameters other than the top-k parameters
     # for name, param in model.named_parameters():

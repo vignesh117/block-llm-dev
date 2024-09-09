@@ -31,7 +31,6 @@ from datasets import load_dataset
 from huggingface_hub import Repository, create_repo
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
-from utils import adjust_parameters_selective_weighted
 
 import transformers
 from transformers import (
@@ -48,8 +47,10 @@ from transformers import (
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
-from galore_torch import GaLoreAdamW, AdamBCDConservative
+# from blockllm import GaLoreAdamW, AdamBCDConservative
+from blockllm_torch import BlockLLM
 import numpy as np
+import ipdb
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 # check_min_version("4.38.0.dev0")
@@ -248,18 +249,13 @@ def parse_args():
         help="Whether or not to enable to load a pretrained model whose head dimensions are different.",
     )
 
-    # support enable_galore
+    # support blockllm
     parser.add_argument(
-        "--enable_galore",
+        "--enable_blockllm",
         action="store_true",
-        help="Whether or not to use low rank optimizer.",
+        help="Whether or not to use blockllm optimizer.",
     )
-    # update_proj_gap
-    parser.add_argument("--update_proj_gap", type=int, default=50)
-    # galore_scale
-    parser.add_argument("--galore_scale", type=float, default=1.0)
-    # proj_type
-    parser.add_argument("--proj_type", type=str, default="std")
+
     # lora_all_modules
     parser.add_argument(
         "--lora_all_modules",
@@ -278,6 +274,14 @@ def parse_args():
         type=str,
         default=None,
         help="low rank method for wandb sweep",
+    )
+
+    # Add argument for sparsity level and update frequency
+    parser.add_argument(
+        "--sparsity_level", type=float, default=0.95, help="Sparsity level for BlockLLM"
+    )
+    parser.add_argument(
+        "--update_freq", type=int, default=None, help="Update frequency for BlockLLM"
     )
 
     args = parser.parse_args()
@@ -635,12 +639,7 @@ def main():
         },
     ]
 
-    if not args.enable_galore:
-
-        # # The below option will enable full finet-tuning.
-        # optimizer = torch.optim.AdamW(
-        #     optimizer_grouped_parameters, lr=args.learning_rate
-        # )
+    if args.enable_blockllm:
 
         # Replace full fine-tuning with BCD training. This amounts to doing the following
         """
@@ -651,43 +650,24 @@ def main():
             2.2. The cleanest way to do achieve this would be to define a callback function, that is called
                 everytime we hit the update frequency
         """
-        optimizer = AdamBCDConservative(
-            optimizer_grouped_parameters, lr=args.learning_rate
+
+        # update_freq is None, then it will be set to the default value
+
+        if args.update_freq is None:
+            update_freq = 50
+        else:
+            update_freq = args.update_freq
+
+        optimizer = BlockLLM(
+            model.parameters(),
+            lr=args.learning_rate,
+            model=model,
+            update_freq=update_freq,
+            sparsity_level=args.sparsity_level,
         )
     else:
-        from torch import nn
-
-        # label layers for galore optimizer
-        # target_modules_list = ["attn", "mlp"]
-        # target_modules_list = ["q_proj", "v_proj"]
-        galore_params = []
-        for module_name, module in model.named_modules():
-            if not isinstance(module, nn.Linear):
-                continue
-
-            if not any(target_key in module_name for target_key in target_modules_list):
-                continue
-
-            print("enable GaLore for weights in module: ", module_name)
-            galore_params.append(module.weight)
-
-        id_galore_params = [id(p) for p in galore_params]
-        # make parameters without "rank" to another group
-        regular_params = [
-            p for p in model.parameters() if id(p) not in id_galore_params
-        ]
-        # then call galore_adamw
-        param_groups = [
-            {"params": regular_params},
-            {
-                "params": galore_params,
-                "rank": args.lora_r,
-                "update_proj_gap": args.update_proj_gap,
-                "scale": args.galore_scale,
-                "proj_type": args.proj_type,
-            },
-        ]
-        optimizer = GaLoreAdamW(param_groups, lr=args.learning_rate)
+        # Default to AdamW
+        optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
@@ -748,24 +728,6 @@ def main():
         * accelerator.num_processes
         * args.gradient_accumulation_steps
     )
-
-    # Some BCD parameters
-    update_freq = math.floor(args.max_train_steps / 4)
-    sparsity_level = 0.98
-    param_names = []
-    param_dist_weights = {}
-    total_no_parameters = 0
-    if not args.enable_galore:
-        for idx, (name, param) in enumerate(model.named_parameters()):
-            param_names.append(name)
-            total_no_parameters += param.numel()
-
-        param_dist_weights = dict(
-            zip(
-                param_names,
-                (np.array(range(1, len(param_names) + 1))) / len(param_names),
-            )
-        )
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
@@ -840,19 +802,6 @@ def main():
             active_dataloader = train_dataloader
         for step, batch in enumerate(active_dataloader):
 
-            # BCD: check if we need to update the optimizer state
-
-            if (not args.enable_galore) and (n_iter % update_freq == 0):
-                logging.info("Adjusting parameters")
-                optimizer = adjust_parameters_selective_weighted(
-                    None,
-                    model,
-                    batch,
-                    sparsity_level=sparsity_level,
-                    total_no_params=total_no_parameters,
-                    param_dist_weights=param_dist_weights,
-                    learning_rate=args.learning_rate,
-                )
             # This needs to be updated here only and not before this
             n_iter += 1
 

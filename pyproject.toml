@@ -1,4 +1,0 @@
-#
-[tool.pyright]
-venvPath = "/Users/avramesh/opt/miniconda3/envs/galore/"
-venv = "."
