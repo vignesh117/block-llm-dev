@@ -58,6 +58,8 @@ HF_HOME=/workspace/.cache python -m torch.distributed.run \
 ## Integration with Llama-factory
 We are aiming to get BlockLLM integrated into the Llama-factory repo. Our unofficial implementation can be found at https://github.com/vignesh117/LLaMA-Factory. Please see the examples in `examples/extras/blockllm`.
 
+## Citation
+
 Please cite our paper if you use this code in your work:
 ```
 @article{zhao2024blockllm,
