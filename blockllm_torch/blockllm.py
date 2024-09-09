@@ -1,7 +1,6 @@
 import math
 import torch
 from torch.optim.optimizer import Optimizer
-import ipdb
 
 
 class BlockLLM(Optimizer):
