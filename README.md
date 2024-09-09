@@ -13,7 +13,12 @@ This repository is the official implementation of BlockLLM https://arxiv.org/abs
 pip install -r exp-requirements.txt
 ```
 
-2. Finetuning on GLUE tasks:
+2. Install blockllm package:
+```bash
+pip install -e .
+```
+
+3. Finetuning on GLUE tasks:
 ```bash
 python run_glue.py \
     --model_name_or_path roberta-base \
